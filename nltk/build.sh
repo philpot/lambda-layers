@@ -20,8 +20,8 @@ fi
 mkdir -p "$BUILD_DIR"
 
 # Build the Docker image
-echo "🐳 Building Docker image..."
-docker build -t "$LAYER_NAME-builder" "$SCRIPT_DIR"
+echo "🐳 Building Docker image for x86_64 platform..."
+docker build --platform linux/amd64 -t "$LAYER_NAME-builder" "$SCRIPT_DIR"
 
 # Extract the layer zip from the container
 echo "📦 Extracting layer package..."
