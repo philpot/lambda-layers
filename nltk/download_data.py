@@ -36,8 +36,11 @@ def main():
     print("\nVerifying downloads...")
     nltk.data.path.insert(0, nltk_data_dir)
 
+    # Import the sentiment analyzer after setting data path
+    from nltk.sentiment import SentimentIntensityAnalyzer
+
     verification_tests = [
-        ('vader_lexicon', lambda: nltk.data.find('vader_lexicon')),
+        ('vader_lexicon', lambda: SentimentIntensityAnalyzer()),
         ('punkt', lambda: nltk.data.find('tokenizers/punkt')),
     ]
 
