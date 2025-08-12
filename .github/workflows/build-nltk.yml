@@ -1,0 +1,126 @@
+name: Build NLTK Layer
+
+on:
+  push:
+    paths:
+      - 'nltk/**'
+      - '.github/workflows/build-nltk.yml'
+  pull_request:
+    paths:
+      - 'nltk/**'
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'Deploy to AWS after build'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build NLTK layer
+      working-directory: nltk
+      run: |
+        chmod +x build.sh
+        ./build.sh
+
+    - name: Run layer tests
+      working-directory: nltk
+      run: |
+        docker run --rm nltk-python311-builder python3.11 test_layer.py
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: nltk-layer
+        path: nltk/build/layer.zip
+        retention-days: 30
+
+    - name: Check layer size
+      working-directory: nltk/build
+      run: |
+        SIZE_BYTES=$(stat -c%s layer.zip)
+        SIZE_MB=$((SIZE_BYTES / 1024 / 1024))
+        echo "Layer size: ${SIZE_MB}MB"
+
+        if [ $SIZE_BYTES -gt 52428800 ]; then  # 50MB in bytes
+          echo "::error::Layer exceeds 50MB limit (${SIZE_MB}MB)"
+          exit 1
+        fi
+
+        echo "::notice::Layer size: ${SIZE_MB}MB (within 50MB limit)"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event.inputs.deploy == 'true' && github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-2
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: nltk-layer
+        path: ./build
+
+    - name: Deploy to AWS Lambda
+      run: |
+        LAYER_VERSION=$(aws lambda publish-layer-version \
+          --layer-name nltk-python311 \
+          --zip-file fileb://./build/layer.zip \
+          --compatible-runtimes python3.11 \
+          --compatible-architectures x86_64 \
+          --description "NLTK library with vader_lexicon and punkt data - $(date '+%Y-%m-%d')" \
+          --query 'Version' \
+          --output text)
+
+        echo "Deployed layer version: $LAYER_VERSION"
+
+        LAYER_ARN="arn:aws:lambda:us-east-2:$(aws sts get-caller-identity --query Account --output text):layer:nltk-python311:$LAYER_VERSION"
+        echo "Layer ARN: $LAYER_ARN"
+
+        # Update README with new ARN (optional)
+        echo "::notice::New layer ARN: $LAYER_ARN"
+
+    - name: Test deployed layer
+      run: |
+        # Create a simple test function to verify the deployed layer works
+        cat > test_function.py << 'EOF'
+        import json
+        from nltk.sentiment import SentimentIntensityAnalyzer
+
+        def lambda_handler(event, context):
+            sia = SentimentIntensityAnalyzer()
+            result = sia.polarity_scores("This is a test!")
+            return {
+                'statusCode': 200,
+                'body': json.dumps(result)
+            }
+        EOF
+
+        # Package the test function
+        zip test_function.zip test_function.py
+
+        # Deploy test function (this would need additional setup)
+        echo "Test function created. Manual verification required."
