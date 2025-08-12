@@ -3,7 +3,7 @@ FROM amazonlinux:2023
 
 # Install Python 3.11 and development tools
 RUN yum update -y && \
-    yum install -y python3.11 python3.11-pip python3.11-dev gcc && \
+    yum install -y python3.11 python3.11-pip python3.11-devel gcc make && \
     yum clean all
 
 # Create the layer directory structure
@@ -16,11 +16,14 @@ WORKDIR /app
 COPY requirements.txt download_data.py ./
 
 # Install Python packages to the layer directory
-RUN python3.11 -m pip install --no-cache-dir --upgrade pip && \
-    python3.11 -m pip install --no-cache-dir -r requirements.txt -t /opt/python/
+# Force compilation from source to ensure Amazon Linux compatibility
+RUN python3.11 -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    python3.11 -m pip install --no-cache-dir --no-binary=regex --force-reinstall --no-deps regex==2023.12.25 -t /opt/python/ && \
+    python3.11 -m pip install --no-cache-dir nltk==3.8.1 joblib==1.3.2 -t /opt/python/
 
-# Download NLTK data
+# Download NLTK data (after installing NLTK)
 ENV NLTK_DATA=/opt/python/nltk_data
+ENV PYTHONPATH=/opt/python
 RUN python3.11 download_data.py
 
 # Clean up unnecessary files to reduce size
